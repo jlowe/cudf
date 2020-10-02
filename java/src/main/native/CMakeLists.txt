@@ -288,6 +288,7 @@ set(SOURCE_FILES
     "src/RmmJni.cpp"
     "src/ScalarJni.cpp"
     "src/TableJni.cpp"
+    "src/batched_device_copy.cu"
     "src/map_lookup.cu")
 add_library(cudfjni SHARED ${SOURCE_FILES})
 

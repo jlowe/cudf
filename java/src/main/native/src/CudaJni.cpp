@@ -15,6 +15,7 @@
  */
 
 #include "jni_utils.hpp"
+#include "batched_device_copy.hpp"
 
 namespace {
 
@@ -304,6 +305,33 @@ JNIEXPORT void JNICALL Java_ai_rapids_cudf_Cuda_asyncMemcpyOnStream(JNIEnv *env,
     auto kind = static_cast<cudaMemcpyKind>(jkind);
     auto stream = reinterpret_cast<cudaStream_t>(jstream);
     JNI_CUDA_TRY(env, , cudaMemcpyAsync(dst, src, count, kind, stream));
+  }
+  CATCH_STD(env, );
+}
+
+JNIEXPORT void JNICALL Java_ai_rapids_cudf_Cuda_batchedMemcpyAsync(JNIEnv* env, jclass,
+                                                                   jlongArray jinputs,
+                                                                   jlong jstream) {
+  try {
+    using namespace cudf::jni;
+    auto_set_device(env);
+    native_jlongArray inputs(env, jinputs);
+    JNI_ARG_CHECK(env, inputs.size() % 3 == 0,
+                  "input is not a multiple of buffer copy descriptor field count", );
+    std::vector<buffer_copy_descr> descrs{};
+    descrs.reserve(inputs.size());
+    for (int i = 0; i < inputs.size();) {
+      auto dest_addr = reinterpret_cast<void*>(inputs[i++]);
+      auto src_addr = reinterpret_cast<void const*>(inputs[i++]);
+      auto size = static_cast<std::size_t>(inputs[i++]);
+      descrs.push_back({dest_addr, src_addr, size});
+    }
+    auto stream = reinterpret_cast<cudaStream_t>(jstream);
+    rmm::device_uvector<buffer_copy_descr> device_descrs(descrs.size(), stream);
+    JNI_CUDA_TRY(env, , cudaMemcpyAsync(device_descrs.data(), descrs.data(),
+                                        sizeof(buffer_copy_descr) * descrs.size(),
+                                        cudaMemcpyHostToDevice, stream));
+    JNI_CUDA_TRY(env, , cudf::jni::batched_memcpy_async(device_descrs, stream));
   }
   CATCH_STD(env, );
 }
