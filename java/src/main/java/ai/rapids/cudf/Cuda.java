@@ -450,6 +450,22 @@ public class Cuda {
   private static native void asyncMemcpyOnStream(long dst, long src, long count, int kind,
                                                  long stream) throws CudaException;
 
+  public static void batchedMemcpyAsync(long[] destAddrs, long[] srcAddrs, long[] sizes,
+                                        Cuda.Stream stream) {
+    assert(destAddrs.length == srcAddrs.length);
+    assert(destAddrs.length == sizes.length);
+    long[] inputs = new long[destAddrs.length * 3];
+    int nextInput = 0;
+    for (int bufferIndex = 0; bufferIndex < destAddrs.length; ++bufferIndex) {
+      inputs[nextInput++] = destAddrs[bufferIndex];
+      inputs[nextInput++] = srcAddrs[bufferIndex];
+      inputs[nextInput++] = sizes[bufferIndex];
+    }
+    batchedMemcpyAsync(inputs, stream.getStream());
+  }
+
+  private static native void batchedMemcpyAsync(long[] inputs, long stream);
+
   /**
    * This should only be used for tests, to enable or disable tests if the current environment
    * is not compatible with this version of the library.  Currently it only does some very

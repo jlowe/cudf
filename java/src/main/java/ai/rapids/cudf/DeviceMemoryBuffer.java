@@ -153,4 +153,24 @@ public class DeviceMemoryBuffer extends BaseDeviceMemoryBuffer {
     incRefCount();
     return new DeviceMemoryBuffer(view.address, view.length, this);
   }
+
+  public static void batchedCopyAsync(DeviceMemoryBuffer[] destBuffers,
+                                      DeviceMemoryBuffer[] srcBuffers,
+                                      Cuda.Stream stream) {
+    assert(destBuffers.length == srcBuffers.length);
+    int numBuffers = destBuffers.length;
+    long[] destAddrs = new long[numBuffers];
+    long[] srcAddrs = new long[numBuffers];
+    long[] sizes = new long[numBuffers];
+    for (int i = 0; i < numBuffers; ++i) {
+      if (destBuffers[i].getLength() < srcBuffers[i].getLength()) {
+        throw new IllegalArgumentException(destBuffers[i] + " will not fit source buffer " +
+            srcBuffers[i]);
+      }
+      destAddrs[i] = destBuffers[i].getAddress();
+      srcAddrs[i] = srcBuffers[i].getAddress();
+      sizes[i] = destBuffers[i].getLength();
+    }
+    Cuda.batchedMemcpyAsync(destAddrs, srcAddrs, sizes, stream);
+  }
 }
