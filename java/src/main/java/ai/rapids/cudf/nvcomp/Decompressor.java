@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION.
+ * Copyright (c) 2020-2021, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ public class Decompressor {
    * @return amount in bytes of temporary storage space required to decompress
    */
   public static long getTempSize(Metadata metadata) {
-    return NvcompJni.decompressGetTempSize(metadata.getMetadata());
+    return metadata.getTempSize();
   }
 
   /**
@@ -53,7 +53,7 @@ public class Decompressor {
    * @return amount in bytes of output storage space required to decompress
    */
   public static long getOutputSize(Metadata metadata) {
-    return NvcompJni.decompressGetOutputSize(metadata.getMetadata());
+    return metadata.getOutputSize();
   }
 
   /**
@@ -77,10 +77,11 @@ public class Decompressor {
   /**
    * Determine if a buffer is data compressed with LZ4.
    * @param buffer data to examine
+   * @param stream CUDA stream to use
    * @return true if the data is LZ4 compressed
    */
-  public static boolean isLZ4Data(BaseDeviceMemoryBuffer buffer) {
-    return NvcompJni.isLZ4Data(buffer.getAddress(), buffer.getLength());
+  public static boolean isLZ4Data(BaseDeviceMemoryBuffer buffer, Cuda.Stream stream) {
+    return LZ4Decompressor.isLZ4Data(buffer, stream);
   }
 
 
@@ -107,6 +108,21 @@ public class Decompressor {
      */
     public boolean isLZ4Metadata() {
       return NvcompJni.isLZ4Metadata(getMetadata());
+    }
+
+    /** Get the temporary storage size needed to decompress. */
+    public long getTempSize() {
+      return NvcompJni.decompressGetTempSize(getMetadata());
+    }
+
+    /** Get the uncompressed size of the data */
+    public long getOutputSize() {
+      return NvcompJni.decompressGetOutputSize(getMetadata());
+    }
+
+    /** Get the type of data that is compressed */
+    public CompressionType getType() {
+      return CompressionType.fromNativeId(NvcompJni.decompressGetType(getMetadata()));
     }
 
     @Override

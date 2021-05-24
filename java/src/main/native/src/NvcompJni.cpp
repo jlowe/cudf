@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION.
+ * Copyright (c) 2020-2021, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-#include <cascaded.h>
-#include <lz4.h>
 #include <nvcomp.h>
+#include <nvcomp/lz4.h>
 
 #include "cudf_jni_apis.hpp"
 
@@ -40,6 +39,9 @@ void check_nvcomp_status(JNIEnv *env, nvcompError_t status) {
     case nvcompErrorCudaError:
       cudf::jni::throw_java_exception(env, NVCOMP_CUDA_ERROR_CLASS, "nvcomp CUDA error");
       break;
+    case nvcompErrorInternal:
+      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "nvcomp internal error");
+      break;
     default:
       cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "nvcomp unknown error");
       break;
@@ -53,11 +55,11 @@ extern "C" {
 JNIEXPORT jlong JNICALL
 Java_ai_rapids_cudf_nvcomp_NvcompJni_decompressGetMetadata(JNIEnv *env, jclass,
                                                            jlong in_ptr, jlong in_size,
-                                                           jlong jstream) {
+                                                           jlong j_stream) {
   try {
     cudf::jni::auto_set_device(env);
-    void *metadata_ptr;
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
+    void *metadata_ptr = nullptr;
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
     auto status = nvcompDecompressGetMetadata(reinterpret_cast<void *>(in_ptr), in_size,
                                               &metadata_ptr, stream);
     check_nvcomp_status(env, status);
@@ -79,7 +81,7 @@ Java_ai_rapids_cudf_nvcomp_NvcompJni_decompressGetTempSize(JNIEnv *env, jclass,
                                                            jlong metadata_ptr) {
   try {
     cudf::jni::auto_set_device(env);
-    size_t temp_size;
+    std::size_t temp_size = 0;
     auto status = nvcompDecompressGetTempSize(reinterpret_cast<void *>(metadata_ptr), &temp_size);
     check_nvcomp_status(env, status);
     return temp_size;
@@ -91,36 +93,57 @@ Java_ai_rapids_cudf_nvcomp_NvcompJni_decompressGetOutputSize(JNIEnv *env, jclass
                                                              jlong metadata_ptr) {
   try {
     cudf::jni::auto_set_device(env);
-    size_t out_size;
+    std::size_t out_size = 0;
     auto status = nvcompDecompressGetOutputSize(reinterpret_cast<void *>(metadata_ptr), &out_size);
     check_nvcomp_status(env, status);
     return out_size;
   } CATCH_STD(env, 0);
 }
 
-JNIEXPORT void JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_decompressAsync(JNIEnv *env, jclass,
-                                                     jlong in_ptr, jlong in_size,
-                                                     jlong temp_ptr, jlong temp_size,
-                                                     jlong metadata_ptr,
-                                                     jlong out_ptr, jlong out_size, jlong jstream) {
+JNIEXPORT jint JNICALL
+Java_ai_rapids_cudf_nvcomp_NvcompJni_decompressGetType(JNIEnv *env, jclass,
+                                                       jlong metadata_ptr) {
   try {
     cudf::jni::auto_set_device(env);
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    auto status = nvcompDecompressAsync(reinterpret_cast<void *>(in_ptr), in_size,
-                                        reinterpret_cast<void *>(temp_ptr), temp_size,
-                                        reinterpret_cast<void *>(metadata_ptr),
-                                        reinterpret_cast<void *>(out_ptr), out_size,
-                                        stream);
+    nvcompType_t out_type;
+    auto status = nvcompDecompressGetType(reinterpret_cast<void *>(metadata_ptr), &out_type);
+    check_nvcomp_status(env, status);
+    return static_cast<jint>(out_type);
+  } CATCH_STD(env, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_ai_rapids_cudf_nvcomp_NvcompJni_decompressAsync(JNIEnv *env, jclass,
+                                                     jlong j_in_ptr, jlong j_in_size,
+                                                     jlong j_temp_ptr, jlong j_temp_size,
+                                                     jlong j_metadata_ptr,
+                                                     jlong j_out_ptr, jlong j_out_size,
+                                                     jlong j_stream) {
+  try {
+    cudf::jni::auto_set_device(env);
+    auto in_ptr = reinterpret_cast<void const*>(j_in_ptr);
+    auto in_size = static_cast<std::size_t>(j_in_size);
+    auto temp_ptr = reinterpret_cast<void *>(j_temp_ptr);
+    auto temp_size = static_cast<std::size_t>(j_temp_size);
+    auto metadata_ptr = reinterpret_cast<void *>(j_metadata_ptr);
+    auto out_ptr = reinterpret_cast<void *>(j_out_ptr);
+    auto out_size = static_cast<std::size_t>(j_out_size);
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
+    auto status = nvcompDecompressAsync(in_ptr, in_size, temp_ptr, temp_size, metadata_ptr,
+                                        out_ptr, out_size, stream);
     check_nvcomp_status(env, status);
   } CATCH_STD(env, );
 }
 
 JNIEXPORT jboolean JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_isLZ4Data(JNIEnv *env, jclass, jlong in_ptr, jlong in_size) {
+Java_ai_rapids_cudf_nvcomp_NvcompJni_isLZ4Data(JNIEnv *env, jclass, jlong j_in_ptr, jlong j_in_size,
+                                               jlong j_stream) {
   try {
     cudf::jni::auto_set_device(env);
-    return LZ4IsData(reinterpret_cast<void *>(in_ptr), in_size);
+    auto in_ptr = reinterpret_cast<void const *>(j_in_ptr);
+    auto in_size = static_cast<std::size_t>(j_in_size);
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
+    return LZ4IsData(in_ptr, in_size, stream);
   } CATCH_STD(env, 0)
 }
 
@@ -132,422 +155,216 @@ Java_ai_rapids_cudf_nvcomp_NvcompJni_isLZ4Metadata(JNIEnv *env, jclass, jlong me
   } CATCH_STD(env, 0)
 }
 
-JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4CompressGetTempSize(JNIEnv *env, jclass,
-                                                            jlong in_ptr, jlong in_size,
-                                                            jint input_type, jlong chunk_size) {
+JNIEXPORT jlongArray JNICALL
+Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4CompressConfigure(JNIEnv *env, jclass,
+                                                          jint j_chunk_size,
+                                                          jlong j_uncompressed_size) {
   try {
     cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
     nvcompLZ4FormatOpts opts{};
-    opts.chunk_size = chunk_size;
-    size_t temp_size;
-    auto status = nvcompLZ4CompressGetTempSize(reinterpret_cast<void *>(in_ptr), in_size,
-                                               comp_type, &opts, &temp_size);
+    opts.chunk_size = static_cast<std::size_t>(j_chunk_size);
+    auto uncompressed_size = static_cast<std::size_t>(j_uncompressed_size);
+    std::size_t metadata_bytes = 0;
+    std::size_t temp_bytes = 0;
+    std::size_t out_bytes = 0;
+    auto status = nvcompLZ4CompressConfigure(&opts, NVCOMP_TYPE_CHAR, uncompressed_size,
+                                             &metadata_bytes, &temp_bytes, &out_bytes);
     check_nvcomp_status(env, status);
-    return temp_size;
-  } CATCH_STD(env, 0);
-}
-
-JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4CompressGetOutputSize(JNIEnv *env, jclass,
-                                                              jlong in_ptr, jlong in_size,
-                                                              jint input_type, jlong chunk_size,
-                                                              jlong temp_ptr, jlong temp_size,
-                                                              jboolean compute_exact) {
-  try {
-    cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
-    nvcompLZ4FormatOpts opts{};
-    opts.chunk_size = chunk_size;
-    size_t out_size;
-    auto status = nvcompLZ4CompressGetOutputSize(reinterpret_cast<void *>(in_ptr), in_size,
-                                                 comp_type, &opts,
-                                                 reinterpret_cast<void *>(temp_ptr), temp_size,
-                                                 &out_size, compute_exact);
-    check_nvcomp_status(env, status);
-    return out_size;
-  } CATCH_STD(env, 0);
-}
-
-JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4Compress(JNIEnv *env, jclass,
-                                                 jlong in_ptr, jlong in_size,
-                                                 jint input_type, jlong chunk_size,
-                                                 jlong temp_ptr, jlong temp_size,
-                                                 jlong out_ptr, jlong out_size,
-                                                 jlong jstream) {
-  try {
-    cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
-    nvcompLZ4FormatOpts opts{};
-    opts.chunk_size = chunk_size;
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    size_t compressed_size = out_size;
-    auto status = nvcompLZ4CompressAsync(reinterpret_cast<void *>(in_ptr), in_size,
-                                         comp_type, &opts,
-                                         reinterpret_cast<void *>(temp_ptr), temp_size,
-                                         reinterpret_cast<void *>(out_ptr), &compressed_size,
-                                         stream);
-    check_nvcomp_status(env, status);
-    if (cudaStreamSynchronize(stream) != cudaSuccess) {
-      JNI_THROW_NEW(env, NVCOMP_CUDA_ERROR_CLASS, "Error synchronizing stream", 0);
-    }
-    return compressed_size;
+    cudf::jni::native_jlongArray result(env, 3);
+    result[0] = static_cast<jlong>(metadata_bytes);
+    result[1] = static_cast<jlong>(temp_bytes);
+    result[2] = static_cast<jlong>(out_bytes);
+    return result.get_jArray();
   } CATCH_STD(env, 0);
 }
 
 JNIEXPORT void JNICALL
 Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4CompressAsync(JNIEnv *env, jclass,
-                                                      jlong compressed_output_ptr,
-                                                      jlong in_ptr, jlong in_size,
-                                                      jint input_type, jlong chunk_size,
-                                                      jlong temp_ptr, jlong temp_size,
-                                                      jlong out_ptr, jlong out_size,
-                                                      jlong jstream) {
+                                                      jlong j_compressed_size_ptr,
+                                                      jlong j_in_ptr, jlong j_in_size,
+                                                      jint j_input_type, jlong j_chunk_size,
+                                                      jlong j_temp_ptr, jlong j_temp_size,
+                                                      jlong j_out_ptr, jlong j_out_size,
+                                                      jlong j_stream) {
   try {
     cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
+    auto in_ptr = reinterpret_cast<void const*>(j_in_ptr);
+    auto in_size = static_cast<std::size_t>(j_in_size);
+    auto comp_type = static_cast<nvcompType_t>(j_input_type);
     nvcompLZ4FormatOpts opts{};
-    opts.chunk_size = chunk_size;
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    auto compressed_size_ptr = reinterpret_cast<size_t *>(compressed_output_ptr);
-    *compressed_size_ptr = out_size;
-    auto status = nvcompLZ4CompressAsync(reinterpret_cast<void *>(in_ptr), in_size,
-                                         comp_type, &opts,
-                                         reinterpret_cast<void *>(temp_ptr), temp_size,
-                                         reinterpret_cast<void *>(out_ptr), compressed_size_ptr,
-                                         stream);
+    opts.chunk_size = static_cast<std::size_t>(j_chunk_size);
+    auto temp_ptr = reinterpret_cast<void *>(j_temp_ptr);
+    auto temp_size = static_cast<std::size_t>(j_temp_size);
+    auto out_ptr = reinterpret_cast<void *>(j_out_ptr);
+    auto compressed_size_ptr = reinterpret_cast<std::size_t*>(j_compressed_size_ptr);
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
+    auto status = nvcompLZ4CompressAsync(&opts, comp_type, in_ptr, in_size, temp_ptr, temp_size,
+                                         out_ptr, compressed_size_ptr, stream);
     check_nvcomp_status(env, status);
   } CATCH_STD(env, );
-}
-
-JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4DecompressGetMetadata(JNIEnv* env, jclass,
-                                                                     jlongArray in_ptrs,
-                                                                     jlongArray in_sizes,
-                                                                     jlong jstream) {
-  try {
-    cudf::jni::auto_set_device(env);
-
-    cudf::jni::native_jpointerArray<void const> input_ptrs(env, in_ptrs);
-    cudf::jni::native_jlongArray input_jsizes(env, in_sizes);
-    if (input_ptrs.size() != input_jsizes.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "input array size mismatch");
-    }
-    std::vector<size_t> sizes;
-    std::transform(input_jsizes.data(), input_jsizes.data() + input_jsizes.size(),
-                   std::back_inserter(sizes),
-                   [](jlong x) -> size_t { return static_cast<size_t>(x); });
-
-    void* metadata_ptr = nullptr;
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    auto status = nvcompBatchedLZ4DecompressGetMetadata(input_ptrs.data(), sizes.data(),
-                                                        input_ptrs.size(), &metadata_ptr, stream);
-    check_nvcomp_status(env, status);
-    return reinterpret_cast<jlong>(metadata_ptr);
-  } CATCH_STD(env, 0);
-}
-
-JNIEXPORT void JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4DecompressDestroyMetadata(JNIEnv* env, jclass,
-                                                                         jlong metadata_ptr) {
-  try {
-    cudf::jni::auto_set_device(env);
-    nvcompBatchedLZ4DecompressDestroyMetadata(reinterpret_cast<void*>(metadata_ptr));
-  } CATCH_STD(env, );
-}
-
-JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4DecompressGetTempSize(JNIEnv* env, jclass,
-                                                                     jlong metadata_ptr) {
-  try {
-    cudf::jni::auto_set_device(env);
-    size_t temp_size;
-    auto status = nvcompBatchedLZ4DecompressGetTempSize(reinterpret_cast<void*>(metadata_ptr),
-                                                        &temp_size);
-    check_nvcomp_status(env, status);
-    return static_cast<jlong>(temp_size);
-  } CATCH_STD(env, 0);
 }
 
 JNIEXPORT jlongArray JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4DecompressGetOutputSize(JNIEnv* env, jclass,
-                                                                       jlong metadata_ptr,
-                                                                       jint num_outputs) {
+Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4DecompressConfigure(JNIEnv* env, jclass,
+                                                            jlong j_input_ptr,
+                                                            jlong j_input_size,
+                                                            jlong j_stream) {
   try {
     cudf::jni::auto_set_device(env);
-    std::vector<size_t> sizes(num_outputs);
-    auto status = nvcompBatchedLZ4DecompressGetOutputSize(reinterpret_cast<void*>(metadata_ptr),
-                                                          num_outputs,
-                                                          sizes.data());
+    auto compressed_ptr = reinterpret_cast<void const *>(j_input_ptr);
+    auto compressed_bytes = static_cast<std::size_t>(j_input_size);
+    void* metadata_ptr = nullptr;
+    std::size_t metadata_bytes = 0;
+    std::size_t temp_bytes = 0;
+    std::size_t uncompressed_bytes = 0;
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
+    auto status = nvcompLZ4DecompressConfigure(compressed_ptr, compressed_bytes,
+                                               &metadata_ptr, &metadata_bytes, &temp_bytes,
+                                               &uncompressed_bytes, stream);
     check_nvcomp_status(env, status);
-    cudf::jni::native_jlongArray jsizes(env, num_outputs);
-    std::transform(sizes.begin(), sizes.end(), jsizes.data(),
-                   [](size_t x) -> jlong { return static_cast<jlong>(x); });
-    return jsizes.get_jArray();
-  } CATCH_STD(env, NULL);
+    cudf::jni::native_jlongArray result(env, 4);
+    result[0] = reinterpret_cast<jlong>(metadata_ptr);
+    result[1] = static_cast<jlong>(metadata_bytes);
+    result[2] = static_cast<jlong>(temp_bytes);
+    result[3] = static_cast<jlong>(uncompressed_bytes);
+    return result.get_jArray();
+  } CATCH_STD(env, 0);
 }
 
 JNIEXPORT void JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4DecompressAsync(JNIEnv* env, jclass,
-                                                               jlongArray in_ptrs,
-                                                               jlongArray in_sizes,
-                                                               jlong temp_ptr,
-                                                               jlong temp_size,
-                                                               jlong metadata_ptr,
-                                                               jlongArray out_ptrs,
-                                                               jlongArray out_sizes,
-                                                               jlong jstream) {
+Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4DecompressAsync(JNIEnv *env, jclass,
+                                                        jlong j_in_ptr, jlong j_in_size,
+                                                        jlong j_metadata_ptr,
+                                                        jlong j_metadata_size,
+                                                        jlong j_temp_ptr, jlong j_temp_size,
+                                                        jlong j_out_ptr, jlong j_out_size,
+                                                        jlong j_stream) {
   try {
     cudf::jni::auto_set_device(env);
-    cudf::jni::native_jpointerArray<void const> input_ptrs(env, in_ptrs);
-    cudf::jni::native_jlongArray input_jsizes(env, in_sizes);
-    if (input_ptrs.size() != input_jsizes.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "input array size mismatch");
-    }
-    std::vector<size_t> input_sizes;
-    std::transform(input_jsizes.data(), input_jsizes.data() + input_jsizes.size(),
-                   std::back_inserter(input_sizes),
-                   [](jlong x) -> size_t { return static_cast<size_t>(x); });
-
-    cudf::jni::native_jpointerArray<void> output_ptrs(env, out_ptrs);
-    cudf::jni::native_jlongArray output_jsizes(env, out_sizes);
-    if (output_ptrs.size() != output_jsizes.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "output array size mismatch");
-    }
-    if (input_ptrs.size() != output_ptrs.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "input/output array size mismatch");
-    }
-    std::vector<size_t> output_sizes;
-    std::transform(output_jsizes.data(), output_jsizes.data() + output_jsizes.size(),
-                   std::back_inserter(output_sizes),
-                   [](jlong x) -> size_t { return static_cast<size_t>(x); });
-
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    auto status = nvcompBatchedLZ4DecompressAsync(input_ptrs.data(), input_sizes.data(),
-                                                  input_ptrs.size(),
-                                                  reinterpret_cast<void*>(temp_ptr),
-                                                  static_cast<size_t>(temp_size),
-                                                  reinterpret_cast<void*>(metadata_ptr),
-                                                  output_ptrs.data(),
-                                                  output_sizes.data(),
-                                                  stream);
+    auto compressed_ptr = reinterpret_cast<void const *>(j_in_ptr);
+    auto compressed_bytes = static_cast<std::size_t>(j_in_size);
+    auto metadata_ptr = reinterpret_cast<void const *>(j_metadata_ptr);
+    auto metadata_bytes = static_cast<std::size_t>(j_metadata_size);
+    auto temp_ptr = reinterpret_cast<void *>(j_temp_ptr);
+    auto temp_bytes = static_cast<std::size_t>(j_temp_size);
+    auto uncompressed_ptr = reinterpret_cast<void *>(j_out_ptr);
+    auto uncompressed_bytes = static_cast<std::size_t>(j_out_size);
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
+    auto status = nvcompLZ4DecompressAsync(compressed_ptr, compressed_bytes,
+                                           metadata_ptr, metadata_bytes,
+                                           temp_ptr, temp_bytes,
+                                           uncompressed_ptr, uncompressed_bytes,
+                                           stream);
     check_nvcomp_status(env, status);
+  } CATCH_STD(env, );
+}
+
+JNIEXPORT void JNICALL
+Java_ai_rapids_cudf_nvcomp_NvcompJni_lz4DestroyMetadata(JNIEnv* env, jclass,
+                                                        jlong metadata_ptr) {
+  try {
+    cudf::jni::auto_set_device(env);
+    nvcompLZ4DestroyMetadata(reinterpret_cast<void*>(metadata_ptr));
   } CATCH_STD(env, );
 }
 
 JNIEXPORT jlong JNICALL
 Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4CompressGetTempSize(JNIEnv* env, jclass,
-                                                                   jlongArray in_ptrs,
-                                                                   jlongArray in_sizes,
-                                                                   jlong chunk_size) {
+                                                                   jlong j_batch_size,
+                                                                   jlong j_max_chunk_size) {
   try {
     cudf::jni::auto_set_device(env);
-    cudf::jni::native_jpointerArray<void const> input_ptrs(env, in_ptrs);
-    cudf::jni::native_jlongArray input_jsizes(env, in_sizes);
-    if (input_ptrs.size() != input_jsizes.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "input array size mismatch");
-    }
-    std::vector<size_t> sizes;
-    std::transform(input_jsizes.data(), input_jsizes.data() + input_jsizes.size(),
-                   std::back_inserter(sizes),
-                   [](jlong x) -> size_t { return static_cast<size_t>(x); });
-
-    nvcompLZ4FormatOpts opts{};
-    opts.chunk_size = chunk_size;
-    size_t temp_size = 0;
-    auto status = nvcompBatchedLZ4CompressGetTempSize(input_ptrs.data(), sizes.data(),
-                                                      input_ptrs.size(), &opts, &temp_size);
+    auto batch_size = static_cast<std::size_t>(j_batch_size);
+    auto max_chunk_size = static_cast<std::size_t>(j_max_chunk_size);
+    std::size_t temp_size = 0;
+    auto status = nvcompBatchedLZ4CompressGetTempSize(batch_size, max_chunk_size, &temp_size);
     check_nvcomp_status(env, status);
     return static_cast<jlong>(temp_size);
   } CATCH_STD(env, 0);
 }
 
-JNIEXPORT jlongArray JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4CompressGetOutputSize(JNIEnv* env, jclass,
-                                                                     jlongArray in_ptrs,
-                                                                     jlongArray in_sizes,
-                                                                     jlong chunk_size,
-                                                                     jlong temp_ptr,
-                                                                     jlong temp_size) {
+JNIEXPORT jlong JNICALL
+Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4CompressGetMaxOutputChunkSize(JNIEnv* env, jclass,
+                                                                             jlong j_max_chunk_size) {
   try {
     cudf::jni::auto_set_device(env);
-    cudf::jni::native_jpointerArray<void const> input_ptrs(env, in_ptrs);
-    cudf::jni::native_jlongArray input_jsizes(env, in_sizes);
-    if (input_ptrs.size() != input_jsizes.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "input array size mismatch");
-    }
-    std::vector<size_t> input_sizes;
-    std::transform(input_jsizes.data(), input_jsizes.data() + input_jsizes.size(),
-                   std::back_inserter(input_sizes),
-                   [](jlong x) -> size_t { return static_cast<size_t>(x); });
-
-    nvcompLZ4FormatOpts opts{};
-    opts.chunk_size = chunk_size;
-    std::vector<size_t> output_sizes(input_ptrs.size());
-    auto status = nvcompBatchedLZ4CompressGetOutputSize(input_ptrs.data(), input_sizes.data(),
-                                                        input_ptrs.size(), &opts,
-                                                        reinterpret_cast<void*>(temp_ptr),
-                                                        static_cast<size_t>(temp_size),
-                                                        output_sizes.data());
+    auto max_chunk_size = static_cast<std::size_t>(j_max_chunk_size);
+    std::size_t max_output_size = 0;
+    auto status = nvcompBatchedLZ4CompressGetMaxOutputChunkSize(max_chunk_size, &max_output_size);
     check_nvcomp_status(env, status);
-    cudf::jni::native_jlongArray jsizes(env, input_ptrs.size());
-    std::transform(output_sizes.begin(), output_sizes.end(), jsizes.data(),
-                   [](size_t x) -> jlong { return static_cast<jlong>(x); });
-    return jsizes.get_jArray();
-  } CATCH_STD(env, NULL);
+    return static_cast<jlong>(max_output_size);
+  } CATCH_STD(env, 0);
 }
 
 JNIEXPORT void JNICALL
 Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4CompressAsync(JNIEnv* env, jclass,
-                                                             jlong compressed_sizes_out_ptr,
-                                                             jlongArray in_ptrs,
-                                                             jlongArray in_sizes,
-                                                             jlong chunk_size,
-                                                             jlong temp_ptr,
-                                                             jlong temp_size,
-                                                             jlongArray out_ptrs,
-                                                             jlongArray out_sizes,
-                                                             jlong jstream) {
+                                                             jlong j_in_ptrs,
+                                                             jlong j_in_sizes,
+                                                             jlong j_chunk_size,
+                                                             jlong j_batch_size,
+                                                             jlong j_temp_ptr,
+                                                             jlong j_temp_size,
+                                                             jlong j_out_ptrs,
+                                                             jlong j_compressed_sizes_out_ptr,
+                                                             jlong j_stream) {
   try {
     cudf::jni::auto_set_device(env);
-    cudf::jni::native_jpointerArray<void const> input_ptrs(env, in_ptrs);
-    cudf::jni::native_jlongArray input_jsizes(env, in_sizes);
-    if (input_ptrs.size() != input_jsizes.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "input array size mismatch");
-    }
-    std::vector<size_t> input_sizes;
-    std::transform(input_jsizes.data(), input_jsizes.data() + input_jsizes.size(),
-                   std::back_inserter(input_sizes),
-                   [](jlong x) -> size_t { return static_cast<size_t>(x); });
-
-    cudf::jni::native_jpointerArray<void> output_ptrs(env, out_ptrs);
-    cudf::jni::native_jlongArray output_jsizes(env, out_sizes);
-    if (output_ptrs.size() != output_jsizes.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "output array size mismatch");
-    }
-    if (input_ptrs.size() != output_ptrs.size()) {
-      cudf::jni::throw_java_exception(env, NVCOMP_ERROR_CLASS, "input/output array size mismatch");
-    }
-
-    auto output_sizes = reinterpret_cast<size_t*>(compressed_sizes_out_ptr);
-    std::transform(output_jsizes.data(), output_jsizes.data() + output_jsizes.size(),
-                   output_sizes,
-                   [](jlong x) -> size_t { return static_cast<size_t>(x); });
-
-    nvcompLZ4FormatOpts opts{};
-    opts.chunk_size = chunk_size;
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    auto status = nvcompBatchedLZ4CompressAsync(input_ptrs.data(), input_sizes.data(),
-                                                input_ptrs.size(), &opts,
-                                                reinterpret_cast<void*>(temp_ptr),
-                                                static_cast<size_t>(temp_size),
-                                                output_ptrs.data(),
-                                                output_sizes,  // input/output parameter
+    auto in_ptrs = reinterpret_cast<void const* const*>(j_in_ptrs);
+    auto in_sizes = reinterpret_cast<std::size_t const*>(j_in_sizes);
+    auto chunk_size = static_cast<std::size_t>(j_chunk_size);
+    auto batch_size = static_cast<std::size_t>(j_batch_size);
+    auto temp_ptr = reinterpret_cast<void*>(j_temp_ptr);
+    auto temp_size = static_cast<std::size_t>(j_temp_size);
+    auto out_ptrs = reinterpret_cast<void* const*>(j_out_ptrs);
+    auto compressed_out_sizes = reinterpret_cast<size_t*>(j_compressed_sizes_out_ptr);
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
+    auto status = nvcompBatchedLZ4CompressAsync(in_ptrs, in_sizes, chunk_size, batch_size,
+                                                temp_ptr, temp_size, out_ptrs, compressed_out_sizes,
                                                 stream);
     check_nvcomp_status(env, status);
   } CATCH_STD(env, );
 }
 
 JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_cascadedCompressGetTempSize(JNIEnv *env, jclass,
-                                                                 jlong in_ptr, jlong in_size,
-                                                                 jint input_type, jint num_rles,
-                                                                 jint num_deltas, jboolean use_bp) {
+Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4DecompressGetTempSize(JNIEnv* env, jclass,
+                                                                     jlong j_batch_size,
+                                                                     jlong j_chunk_size) {
   try {
     cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
-    nvcompCascadedFormatOpts opts{};
-    opts.num_RLEs = num_rles;
-    opts.num_deltas = num_deltas;
-    opts.use_bp = use_bp;
-    size_t temp_size;
-    auto status = nvcompCascadedCompressGetTempSize(reinterpret_cast<void *>(in_ptr), in_size,
-                                                    comp_type, &opts, &temp_size);
+    auto batch_size = static_cast<std::size_t>(j_batch_size);
+    auto chunk_size = static_cast<std::size_t>(j_chunk_size);
+    std::size_t temp_size = 0;
+    auto status = nvcompBatchedLZ4DecompressGetTempSize(batch_size, chunk_size, &temp_size);
     check_nvcomp_status(env, status);
-    return temp_size;
-  } CATCH_STD(env, 0);
-}
-
-JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_cascadedCompressGetOutputSize(JNIEnv *env, jclass,
-                                                                   jlong in_ptr, jlong in_size,
-                                                                   jint input_type, jint num_rles,
-                                                                   jint num_deltas, jboolean use_bp,
-                                                                   jlong temp_ptr, jlong temp_size,
-                                                                   jboolean compute_exact) {
-  try {
-    cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
-    nvcompCascadedFormatOpts opts{};
-    opts.num_RLEs = num_rles;
-    opts.num_deltas = num_deltas;
-    opts.use_bp = use_bp;
-    size_t out_size;
-    auto status = nvcompCascadedCompressGetOutputSize(reinterpret_cast<void *>(in_ptr), in_size,
-                                                      comp_type, &opts,
-                                                      reinterpret_cast<void *>(temp_ptr), temp_size,
-                                                      &out_size, compute_exact);
-    check_nvcomp_status(env, status);
-    return out_size;
-  } CATCH_STD(env, 0);
-}
-
-JNIEXPORT jlong JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_cascadedCompress(JNIEnv *env, jclass,
-                                                      jlong in_ptr, jlong in_size,
-                                                      jint input_type, jint num_rles,
-                                                      jint num_deltas, jboolean use_bp,
-                                                      jlong temp_ptr, jlong temp_size,
-                                                      jlong out_ptr, jlong out_size,
-                                                      jlong jstream) {
-  try {
-    cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
-    nvcompCascadedFormatOpts opts{};
-    opts.num_RLEs = num_rles;
-    opts.num_deltas = num_deltas;
-    opts.use_bp = use_bp;
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    size_t compressed_size = out_size;
-    auto status = nvcompCascadedCompressAsync(reinterpret_cast<void *>(in_ptr), in_size,
-                                              comp_type, &opts,
-                                              reinterpret_cast<void *>(temp_ptr), temp_size,
-                                              reinterpret_cast<void *>(out_ptr), &compressed_size,
-                                              stream);
-    check_nvcomp_status(env, status);
-    if (cudaStreamSynchronize(stream) != cudaSuccess) {
-      JNI_THROW_NEW(env, NVCOMP_CUDA_ERROR_CLASS, "Error synchronizing stream", 0);
-    }
-    return compressed_size;
+    return static_cast<jlong>(temp_size);
   } CATCH_STD(env, 0);
 }
 
 JNIEXPORT void JNICALL
-Java_ai_rapids_cudf_nvcomp_NvcompJni_cascadedCompressAsync(JNIEnv *env, jclass,
-                                                           jlong compressed_output_ptr,
-                                                           jlong in_ptr, jlong in_size,
-                                                           jint input_type, jint num_rles,
-                                                           jint num_deltas, jboolean use_bp,
-                                                           jlong temp_ptr, jlong temp_size,
-                                                           jlong out_ptr, jlong out_size,
-                                                           jlong jstream) {
+Java_ai_rapids_cudf_nvcomp_NvcompJni_batchedLZ4DecompressAsync(JNIEnv* env, jclass,
+                                                               jlong j_in_ptrs,
+                                                               jlong j_in_sizes,
+                                                               jlong j_out_sizes,
+                                                               jlong j_chunk_size,
+                                                               jlong j_batch_size,
+                                                               jlong j_temp_ptr,
+                                                               jlong j_temp_size,
+                                                               jlong j_out_ptrs,
+                                                               jlong j_stream) {
   try {
     cudf::jni::auto_set_device(env);
-    auto comp_type = static_cast<nvcompType_t>(input_type);
-    nvcompCascadedFormatOpts opts{};
-    opts.num_RLEs = num_rles;
-    opts.num_deltas = num_deltas;
-    opts.use_bp = use_bp;
-    auto stream = reinterpret_cast<cudaStream_t>(jstream);
-    auto compressed_size_ptr = reinterpret_cast<size_t *>(compressed_output_ptr);
-    *compressed_size_ptr = out_size;
-    auto status = nvcompCascadedCompressAsync(reinterpret_cast<void *>(in_ptr), in_size,
-                                              comp_type, &opts,
-                                              reinterpret_cast<void *>(temp_ptr), temp_size,
-                                              reinterpret_cast<void *>(out_ptr),
-                                              compressed_size_ptr, stream);
+    auto in_ptrs = reinterpret_cast<void const* const*>(j_in_ptrs);
+    auto in_sizes = reinterpret_cast<std::size_t const*>(j_in_sizes);
+    auto out_sizes = reinterpret_cast<std::size_t const*>(j_out_sizes);
+    auto chunk_size = static_cast<std::size_t>(j_chunk_size);
+    auto batch_size = static_cast<std::size_t>(j_batch_size);
+    auto temp_ptr = reinterpret_cast<void*>(j_temp_ptr);
+    auto temp_size = static_cast<std::size_t>(j_temp_size);
+    auto out_ptrs = reinterpret_cast<void* const*>(j_out_ptrs);
+    auto stream = reinterpret_cast<cudaStream_t>(j_stream);
+    auto status = nvcompBatchedLZ4DecompressAsync(in_ptrs, in_sizes, out_sizes,
+                                                  chunk_size, batch_size, temp_ptr, temp_size,
+                                                  out_ptrs, stream);
     check_nvcomp_status(env, status);
   } CATCH_STD(env, );
 }
