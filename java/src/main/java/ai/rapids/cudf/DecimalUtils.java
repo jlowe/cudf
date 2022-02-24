@@ -161,4 +161,23 @@ public class DecimalUtils {
       return lhs.greaterThan(scalarRhs);
     }
   }
+
+  /**
+   * Multiply two DECIMAL128 columns together into a DECIMAL128 product rounded to the specified
+   * scale with overflow detection.
+   * @param a            factor input, must match row count of the other factor input
+   * @param b            factor input, must match row count of the other factor input
+   * @param productScale scale to use for the product type
+   * @param roundMode    rounding behavior when the product cannot fit as-is in the product type
+   * @return table containing a boolean column and a DECIMAL128 product column of the specified
+   *         scale. The boolean value will be true if an overflow was detected for that row's
+   *         DECIMAL128 product value. A null input row will result in a corresponding null output
+   *         row.
+   */
+  public static Table multiply128(ColumnView a, ColumnView b, int productScale, RoundMode roundMode) {
+    return new Table(multiply128(a.getNativeView(), b.getNativeView(), productScale,
+        roundMode.nativeId));
+  }
+
+  private static native long[] multiply128(long viewA, long viewB, int productScale, int roundMode);
 }
