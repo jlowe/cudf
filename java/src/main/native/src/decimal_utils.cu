@@ -24,21 +24,69 @@
 
 namespace {
 
+// Holds the 64-bit chunks of a 256-bit value
+struct chunked256 {
+  // sign-extend a 128-bit value into a chunked 256-bit value
+  inline __device__ chunked256(__int128_t x) {
+    chunks[0] = static_cast<uint64_t>(x);
+    __int128_t x_shifted = x >> 64;
+    chunks[1] = static_cast<uint64_t>(x_shifted);
+    chunks[2] = static_cast<uint64_t>(x_shifted >> 64);
+    chunks[3] = chunks[2];
+  }
+
+  inline __device__ uint64_t operator[](int i) const { return chunks[i]; }
+  inline __device__ uint64_t &operator[](int i) { return chunks[i]; }
+
+private:
+  uint64_t chunks[4];
+};
+
 // Functor to multiply two DECIMAL128 columns with rounding and overflow detection.
-class dec128_multiplier : public thrust::unary_function<cudf::size_type, __int128_t> {
-public:
+struct dec128_multiplier : public thrust::unary_function<cudf::size_type, __int128_t> {
   dec128_multiplier(bool *overflows, cudf::column_mutable_view const &product_view,
-                    cudf::column_view const &a, cudf::column_view const &b,
+                    cudf::column_view const &a_col, cudf::column_view const &b_col,
                     cudf::rounding_mode round_mode)
-      : overflows(overflows), a_data(a.data<__int128_t>()), b_data(b.data<__int128_t>()),
-        a_scale(a.type().scale()), b_scale(b.type().scale()),
+      : overflows(overflows), a_data(a_col.data<__int128_t>()), b_data(b_col.data<__int128_t>()),
+        a_scale(a_col.type().scale()), b_scale(b_col.type().scale()),
         product_scale(product_view.type().scale()), round_mode(round_mode) {}
 
   __device__ __int128_t operator()(cudf::size_type i) const {
-    
+    chunked256 const a(a_data[i]);
+    chunked256 const b(b_data[i]);
+
+    chunked256 mul = multiply(a_chunks, b_chunks);
+
   }
 
 private:
+  // Perform a 256-bit multiply in 64-bit chunks
+  static __device__ chunked256
+  multiply(chunked256 const &a, chunked256 const &b) {
+    chunked256 r;
+    __uint128_t mul;
+    uint64_t carry = 0;
+    for (int a_idx = 0; a_idx < 4; ++a_idx) {
+      mul = static_cast<__uint128_t>(a[a_idx]) * b[0] + carry;
+      r[a_idx] = static_cast<uint64_t>(mul);
+      carry = static_cast<uint64_t>(mul >> 64);
+    }
+    for (int b_idx = 1; b_idx < 4; ++b_idx) {
+      carry = 0;
+      for (int a = 0; a_idx < 4 - b_idx; ++a_idx) {
+        int r_idx = a_idx + b_idx;
+        mul = static_cast<__uint128_t>(a[a_idx]) * b[b_idx] + r[r_idx] + carry;
+        r[r_idx] = static_cast<uint64_t>(mul);
+        carry = static_cast<uint64_t>(mul >> 64);
+      }
+    }
+    return r;
+  }
+
+  static __device__ std::pair<chunked256, chunked256>
+  divide(chunked256 const &a, chunked256 const &b) {
+  }
+
   // output column for overflow detected
   bool *const overflows;
 
