@@ -228,6 +228,7 @@ add_library(
   src/ColumnViewJni.cu
   src/CompiledExpression.cpp
   src/ContiguousTableJni.cpp
+  src/DecimalUtilsJni.cpp
   src/HashJoinJni.cpp
   src/HostMemoryBufferNativeUtilsJni.cpp
   src/NvcompJni.cpp
@@ -237,6 +238,7 @@ add_library(
   src/ScalarJni.cpp
   src/TableJni.cpp
   src/aggregation128_utils.cu
+  src/decimal_utils.cu
   src/map_lookup.cu
   src/row_conversion.cu
   src/check_nvcomp_output_sizes.cu

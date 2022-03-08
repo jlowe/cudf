@@ -24,7 +24,6 @@ namespace cudf::jni {
 
 std::unique_ptr<cudf::table>
 multiply_decimal128(cudf::column_view const &a, cudf::column_view const &b, int32_t product_scale,
-                    cudf::rounding_method round_mode,
                     rmm::cuda_stream_view stream = rmm::cuda_stream_default);
 
 } // namespace cudf::jni
